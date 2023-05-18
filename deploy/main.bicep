@@ -291,6 +291,7 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
         name: 'apim-routing-rule'
         properties: {
           ruleType: 'Basic'
+          priority: 1
           httpListener: {
             id: resourceId('Microsoft.Network/applicationGateways/httpListeners', 'gateway-openai', 'apim-listener')
           }
