@@ -279,7 +279,7 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
             id: resourceId('Microsoft.Network/applicationGateways/frontEndIPConfigurations', 'gateway-openai', 'appGwPublicFrontendIp')
           }
           frontendPort: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontEndPorts', 'gateway-openai', 'port_80')
+            id: resourceId('Microsoft.Network/applicationGateways/frontEndPorts', 'gateway-openai', 'http')
           }
           protocol: 'Http'
           requireServerNameIndication: false
