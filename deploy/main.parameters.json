@@ -2,17 +2,17 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "location": {
-      "value": "japaneast"
-    },
     "email": {
-      "value": "name@domain.com"
+      "value": "test@microsoft.com"
     },
     "publisherName": {
-      "value": "name"
+      "value": "datria"
     },
-    "openAiLocation": {
-      "value": "eastus"
+    "suffix": {
+      "value": "datria"
+    },
+    "customSubDomainName": {
+      "value": "datria"
     },
     "openai_model_deployments": {
       "value": [

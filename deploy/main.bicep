@@ -1,11 +1,17 @@
 // Define the parameter for location
-param location string
+@description('Location in which resources will be created')
+param location string = resourceGroup().location
 param email string
 param publisherName string
 param suffix string
-param openAiLocation string
+param openAiLocation string = resourceGroup().location
 param customSubDomainName string
 param openai_model_deployments array = []
+
+@description('The resource ID for an existing Log Analytics workspace')
+param log_analytics_workspace_id string
+
+var apim_name = 'apim-openai-${suffix}'
 
 // Network Security Group for the App Gateway subnet
 resource nsggateway 'Microsoft.Network/networkSecurityGroups@2020-11-01' = {
@@ -149,6 +155,41 @@ resource snetendpoints 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' ex
   name: 'snet-endpoints'
 }
 
+resource azure_api_net 'Microsoft.Network/privateDnsZones@2018-09-01' = {
+  name: 'azure-api.net'
+  location: 'global'
+  properties: {}
+  dependsOn: [
+    apim
+    vnetapp
+  ]
+}
+
+resource azure_api_net_apim_name 'Microsoft.Network/privateDnsZones/A@2018-09-01' = if (true) {
+  parent: azure_api_net
+  name: apim_name
+  properties: {
+    ttl: 36000
+    aRecords: [
+      {
+        ipv4Address: apim.properties.privateIPAddresses[0]
+      }
+    ]
+  }
+}
+
+resource azure_api_net_vnet_dns_link_name 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2020-06-01' = {
+  parent: azure_api_net
+  name: 'openai-vnet-dns-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: true
+    virtualNetwork: {
+      id: vnetapp.id
+    }
+  }
+}
+
 // Application Gateway Public IP
 resource publicIPAddress 'Microsoft.Network/publicIPAddresses@2021-08-01' = {
   name: 'pip-gateway-openai'
@@ -185,7 +226,7 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
     ]
     frontendIPConfigurations: [
       {
-        name: 'appGatewayFrontendIP'
+        name: 'appGwPublicFrontendIp'
         properties: {
           privateIPAllocationMethod: 'Dynamic'
           publicIPAddress: {
@@ -204,47 +245,57 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
     ]
     backendAddressPools: [
       {
-        name: 'appGatewayBackendPool'
+        name: 'gatewayBackEnd'
+        properties: {
+          backendAddresses: [
+            {
+              fqdn: '${apim_name}.azure-api.net'
+            }
+          ]
+        }
       }
     ]
     backendHttpSettingsCollection: [
       {
         name: 'appGatewayBackendHttpSettings'
         properties: {
-          port: 80
-          protocol: 'Http'
+          port: 443
+          protocol: 'Https'
           cookieBasedAffinity: 'Disabled'
+          hostName: '${apim_name}.azure-api.net'
           pickHostNameFromBackendAddress: false
-          requestTimeout: 30
+          requestTimeout: 20
+          probe: {
+            id: resourceId('Microsoft.Network/applicationGateways/probes', 'gateway-openai', 'apim-gateway-probe')
+          }
         }
       }
     ]
     httpListeners: [
       {
-        name: 'appGatewayHttpListener'
+        name: 'apim-listener'
         properties: {
           frontendIPConfiguration: {
-            //id: appgateway.properties.frontendIPConfigurations[0].id
-            id: resourceId('Microsoft.Network/applicationGateways/frontendIPConfigurations', 'gateway-openai', 'appGatewayFrontendIP')
+            id: resourceId('Microsoft.Network/applicationGateways/frontEndIPConfigurations', 'gateway-openai', 'appGwPublicFrontendIp')
           }
           frontendPort: {
-            //id: appgateway.properties.frontendPorts[1].id
-            id: resourceId('Microsoft.Network/applicationGateways/frontendPorts', 'gateway-openai', 'http')
+            id: resourceId('Microsoft.Network/applicationGateways/frontEndPorts', 'gateway-openai', 'port_80')
           }
+          protocol: 'Http'
+          requireServerNameIndication: false
         }
       }
     ]
     requestRoutingRules: [
       {
-        name: 'rule1'
+        name: 'apim-routing-rule'
         properties: {
           ruleType: 'Basic'
-          priority: 10
           httpListener: {
-            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', 'gateway-openai', 'appGatewayHttpListener')
+            id: resourceId('Microsoft.Network/applicationGateways/httpListeners', 'gateway-openai', 'apim-listener')
           }
           backendAddressPool: {
-            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', 'gateway-openai', 'appGatewayBackendPool')
+            id: resourceId('Microsoft.Network/applicationGateways/backendAddressPools', 'gateway-openai', 'gatewayBackEnd')
           }
           backendHttpSettings: {
             id: resourceId('Microsoft.Network/applicationGateways/backendHttpSettingsCollection', 'gateway-openai', 'appGatewayBackendHttpSettings')
@@ -252,24 +303,155 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
         }
       }
     ]
+    probes: [
+      {
+        name: 'apim-gateway-probe'
+        properties: {
+          protocol: 'Https'
+          host: '${apim_name}.azure-api.net'
+          port: 443
+          path: '/status-0123456789abcdef'
+          interval: 30
+          timeout: 120
+          unhealthyThreshold: 8
+          pickHostNameFromBackendHttpSettings: false
+          minServers: 0
+        }
+      }
+    ]
+    webApplicationFirewallConfiguration: {
+      enabled: true
+      firewallMode: 'Detection'
+      ruleSetType: 'OWASP'
+      ruleSetVersion: '3.2'
+      requestBodyCheck: true
+      maxRequestBodySizeInKb: 128
+      fileUploadLimitInMb: 100
+    }
+  }
+  dependsOn: [
+    app_insights
+    vnetapp
+    azure_api_net
+  ]
+}
+
+
+// Create App Insights
+resource app_insights 'Microsoft.Insights/components@2020-02-02-preview' = {
+  name: 'insights-openai-${suffix}'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: log_analytics_workspace_id
   }
 }
 
 // Create API Management
-resource apim 'Microsoft.ApiManagement/service@2020-06-01-preview' = {
-  name: 'apim-openai-${suffix}'
+resource apim 'Microsoft.ApiManagement/service@2020-12-01' = {
+  name: apim_name
   location: location
   sku: {
     name: 'Developer'
     capacity: 1
   }
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     publisherEmail: email
     publisherName: publisherName
-    virtualNetworkType: 'External'
+    virtualNetworkType: 'Internal'
     virtualNetworkConfiguration: {
       subnetResourceId: snetapi.id
     }
+  }
+  dependsOn: [
+    snetapi
+  ]
+}
+
+resource apim_gateway 'Microsoft.ApiManagement/service/gateways@2020-12-01' = {
+  parent: apim
+  name: 'my-gateway'
+  properties: {
+    locationData: {
+      name: 'My internal location'
+    }
+    description: 'Self hosted gateway bringing API Management to the edge'
+  }
+}
+
+resource apim_AppInsightsLogger 'Microsoft.ApiManagement/service/loggers@2020-12-01' = {
+  parent: apim
+  name: 'AppInsightsLogger'
+  properties: {
+    loggerType: 'applicationInsights'
+    resourceId: app_insights.id
+    credentials: {
+      instrumentationKey: app_insights.properties.InstrumentationKey
+    }
+  }
+}
+
+resource apim_AppInsights 'Microsoft.ApiManagement/service/diagnostics@2020-12-01' = {
+  parent: apim
+  name: 'applicationinsights'
+  properties: {
+    alwaysLog: 'allErrors'
+    httpCorrelationProtocol: 'Legacy'
+    verbosity: 'information'
+    logClientIp: true
+    loggerId: apim_AppInsightsLogger.id
+    sampling: {
+      samplingType: 'fixed'
+      percentage: 100
+    }
+    frontend: {
+      request: {
+        body: {
+          bytes: 0
+        }
+      }
+      response: {
+        body: {
+          bytes: 0
+        }
+      }
+    }
+    backend: {
+      request: {
+        body: {
+          bytes: 0
+        }
+      }
+      response: {
+        body: {
+          bytes: 0
+        }
+      }
+    }
+  }
+}
+
+resource Microsoft_Insights_diagnosticSettings_logToAnalytics 'Microsoft.Insights/diagnosticSettings@2017-05-01-preview' = {
+  scope: apim
+  name: 'logToAnalytics'
+  properties: {
+    workspaceId: log_analytics_workspace_id
+    logs: [
+      {
+        category: 'GatewayLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: true
+      }
+    ]
   }
 }
 
