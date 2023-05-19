@@ -210,8 +210,8 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
   location: location
   properties: {
     sku: {
-      name: 'Standard_v2'
-      tier: 'Standard_v2'
+      name: 'WAF_v2'
+      tier: 'WAF_v2'
       capacity: 2
     }
     gatewayIPConfigurations: [
@@ -226,7 +226,7 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
     ]
     frontendIPConfigurations: [
       {
-        name: 'appGwPublicFrontendIp'
+        name: 'appGatewayFrontendIP'
         properties: {
           privateIPAllocationMethod: 'Dynamic'
           publicIPAddress: {
@@ -276,7 +276,7 @@ resource appgateway 'Microsoft.Network/applicationGateways@2021-08-01' = {
         name: 'apim-listener'
         properties: {
           frontendIPConfiguration: {
-            id: resourceId('Microsoft.Network/applicationGateways/frontEndIPConfigurations', 'gateway-openai', 'appGwPublicFrontendIp')
+            id: resourceId('Microsoft.Network/applicationGateways/frontEndIPConfigurations', 'gateway-openai', 'appGatewayFrontendIP')
           }
           frontendPort: {
             id: resourceId('Microsoft.Network/applicationGateways/frontEndPorts', 'gateway-openai', 'http')
