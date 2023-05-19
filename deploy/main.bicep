@@ -221,6 +221,9 @@ resource publicIPAddress 'Microsoft.Network/publicIPAddresses@2021-08-01' = {
     publicIPAddressVersion: 'IPv4'
     publicIPAllocationMethod: 'Static'
     idleTimeoutInMinutes: 4
+    dnsSettings: {
+      domainNameLabel: customSubDomainName
+    }
   }
 }
 
