@@ -130,6 +130,16 @@ resource vnetapp 'Microsoft.Network/virtualNetworks@2020-11-01' = {
         properties: {
           addressPrefix: '10.1.1.0/24'
           networkSecurityGroup: { id: nsgapi.id }
+          serviceEndpoints: [
+            {
+              service: 'Microsoft.KeyVault'
+              locations: [
+                '*'
+              ]
+            }
+          ]
+          privateEndpointNetworkPolicies: 'Enabled'
+          privateLinkServiceNetworkPolicies: 'Enabled'
         }
       }
       {
@@ -137,10 +147,30 @@ resource vnetapp 'Microsoft.Network/virtualNetworks@2020-11-01' = {
         properties: {
           addressPrefix: '10.1.2.0/24'
           networkSecurityGroup: { id: nsgapi.id }
+          serviceEndpoints: [
+            {
+              service: 'Microsoft.KeyVault'
+              locations: [
+                '*'
+              ]
+            }
+          ]
+          privateEndpointNetworkPolicies: 'Enabled'
+          privateLinkServiceNetworkPolicies: 'Enabled'
         }
       }
     ]
   }
+}
+
+resource azure_api_net 'Microsoft.Network/privateDnsZones@2018-09-01' = {
+  name: 'azure-api.net'
+  location: 'global'
+  properties: {}
+  dependsOn: [
+    apim_name
+    vnet_name
+  ]
 }
 
 // Subnet for API Management
@@ -153,16 +183,6 @@ resource snetapi 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing
 resource snetendpoints 'Microsoft.Network/virtualNetworks/subnets@2020-11-01' existing = {
   parent: vnetapp
   name: 'snet-endpoints'
-}
-
-resource azure_api_net 'Microsoft.Network/privateDnsZones@2018-09-01' = {
-  name: 'azure-api.net'
-  location: 'global'
-  properties: {}
-  dependsOn: [
-    apim
-    vnetapp
-  ]
 }
 
 resource azure_api_net_apim_name 'Microsoft.Network/privateDnsZones/A@2018-09-01' = if (true) {
@@ -470,3 +490,5 @@ module openAi 'modules/cognitiveservices.bicep' = {
     deployments: openai_model_deployments
   }
 }
+
+output publicEndpointFqdn string = publicIPAddress.properties.dnsSettings.fqdn
